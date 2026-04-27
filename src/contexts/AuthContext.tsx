@@ -9,7 +9,6 @@ export interface AuthUser {
   role: UserRole;
   status: string;
   nom?: string;
-  prenom?: string;
   centre_id?: string;
 }
 
@@ -18,7 +17,7 @@ interface AuthContextType {
   loading: boolean;
   pendingAccount: boolean;
   login: (email: string, password: string) => Promise<{ error: string | null }>;
-  signup: (email: string, password: string, role: UserRole, nom?: string, prenom?: string) => Promise<{ error: string | null }>;
+  signup: (email: string, password: string, role: UserRole, nom?: string) => Promise<{ error: string | null }>;
   logout: () => Promise<void>;
 }
 
@@ -30,20 +29,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [pendingAccount, setPendingAccount] = useState(false);
 
   async function fetchProfile(userId: string): Promise<AuthUser | null> {
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("user_id", userId)
-      .single();
-    if (error || !data) return null;
+    const [{ data: profile, error: profileError }, { data: roleData }] = await Promise.all([
+      supabase.from("profiles").select("*").eq("user_id", userId).single(),
+      supabase.from("user_roles").select("role").eq("user_id", userId).single(),
+    ]);
+
+    if (profileError || !profile) return null;
+
     return {
       id: userId,
-      email: data.email ?? "",
-      role: data.role as UserRole,
-      status: data.status ?? "active",
-      nom: data.nom ?? undefined,
-      prenom: data.prenom ?? undefined,
-      centre_id: data.centre_id ?? undefined,
+      email: profile.email ?? "",
+      role: (roleData?.role ?? "commerçant") as UserRole,
+      status: profile.status ?? "active",
+      nom: profile.name ?? undefined,
+      centre_id: profile.centre_id ?? undefined,
     };
   }
 
@@ -81,8 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     email: string,
     password: string,
     role: UserRole,
-    nom?: string,
-    prenom?: string
+    nom?: string
   ): Promise<{ error: string | null }> {
     setLoading(true);
     const { data, error } = await supabase.auth.signUp({ email, password });
@@ -93,11 +91,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error: profileError } = await supabase.from("profiles").insert({
       user_id: data.user.id,
       email,
-      role,
-      nom: nom ?? null,
-      prenom: prenom ?? null,
+      name: nom ?? null,
       status: "pending",
     });
+    if (!profileError) {
+      await supabase.from("user_roles").insert({
+        user_id: data.user.id,
+        role,
+      });
+    }
     setLoading(false);
     if (profileError) return { error: profileError.message };
     setPendingAccount(true);
