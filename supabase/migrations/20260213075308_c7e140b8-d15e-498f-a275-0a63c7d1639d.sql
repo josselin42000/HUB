@@ -1,0 +1,1 @@
+ALTER TABLE public.banner_config ADD COLUMN image_url text DEFAULT NULL;

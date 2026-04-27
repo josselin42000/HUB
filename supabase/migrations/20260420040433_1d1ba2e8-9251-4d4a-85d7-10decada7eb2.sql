@@ -1,0 +1,1 @@
+ALTER TABLE public.boutique_groups ADD COLUMN IF NOT EXISTS charges numeric;

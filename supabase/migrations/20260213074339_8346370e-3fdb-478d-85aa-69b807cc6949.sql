@@ -1,0 +1,1 @@
+ALTER TABLE public.banner_config ADD COLUMN link_url text DEFAULT NULL;
