@@ -1,109 +1,124 @@
-import { useState, useEffect } from "react";
-import { useAuth } from "@/contexts/AuthContext";
-import LoginPage from "./LoginPage";
-import MainMenu from "./MainMenu";
-import SOSModule from "./SOSModule";
-import SignalementModule from "./SignalementModule";
-import AccesModule from "./AccesModule";
-import SondageModule from "./SondageModule";
-import ChatbotModule from "./ChatbotModule";
-import CollecteModule from "./CollecteModule";
-import CVthequeModule from "./CVthequeModule";
-import BonPlanModule from "./BonPlanModule";
-import InformationModule from "./InformationModule";
-import AdminModule from "./AdminModule";
-import ProprietaireModule from "./ProprietaireModule";
-import CommercantsModule from "./CommercantsModule";
-import { Clock } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
-type Screen = "menu" | "sos" | "signalement" | "acces" | "sondage" | "chatbot" | "collecte" | "cvtheque" | "bonplan" | "information" | "admin" | "proprietaire" | "commercants";
+export type UserRole = "commerçant" | "securite" | "coordinateur" | "gestionnaire" | "proprietaire";
 
-const Index = () => {
-  const { user, loading, logout } = useAuth();
-  const [screen, setScreen] = useState<Screen>("menu");
-  const [isPending, setIsPending] = useState(false);
-  const [checkingStatus, setCheckingStatus] = useState(false);
+export interface AuthUser {
+  id: string;
+  email: string;
+  role: UserRole;
+  status: string;
+  nom?: string;
+  prenom?: string;
+  centre_id?: string;
+}
 
-  useEffect(() => { setScreen("menu"); }, [user?.id]);
+interface AuthContextType {
+  user: AuthUser | null;
+  loading: boolean;
+  pendingAccount: boolean;
+  login: (email: string, password: string) => Promise<{ error: string | null }>;
+  signup: (email: string, password: string, role: UserRole, nom?: string, prenom?: string) => Promise<{ error: string | null }>;
+  logout: () => Promise<void>;
+}
 
-  // Vérifier le statut du compte dès qu'un user est connecté
-  useEffect(() => {
-    if (!user) { setIsPending(false); return; }
-    setCheckingStatus(true);
-    supabase
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [pendingAccount, setPendingAccount] = useState(false);
+
+  async function fetchProfile(userId: string): Promise<AuthUser | null> {
+    const { data, error } = await supabase
       .from("profiles")
-      .select("status")
-      .eq("user_id", user.id)
-      .single()
-      .then(({ data }) => {
-        if (data?.status === "pending") {
-          setIsPending(true);
-          logout(); // déconnecter en arrière-plan
-        } else {
-          setIsPending(false);
-        }
-        setCheckingStatus(false);
-      });
-  }, [user?.id]);
-
-  if (loading || checkingStatus) {
-    return (
-      <div className="min-h-screen mesh-bg flex items-center justify-center">
-        <div className="glass-card rounded-2xl p-8 text-center animate-fade-up">
-          <div className="w-12 h-12 rounded-full border-4 border-primary/30 border-t-primary animate-spin mx-auto mb-4" />
-          <p className="text-sm text-muted-foreground font-display">Chargement...</p>
-        </div>
-      </div>
-    );
+      .select("*")
+      .eq("user_id", userId)
+      .single();
+    if (error || !data) return null;
+    return {
+      id: userId,
+      email: data.email ?? "",
+      role: data.role as UserRole,
+      status: data.status ?? "active",
+      nom: data.nom ?? undefined,
+      prenom: data.prenom ?? undefined,
+      centre_id: data.centre_id ?? undefined,
+    };
   }
 
-  // Compte en attente
-  if (isPending || user?.status === "pending") {
-    return (
-      <div className="min-h-screen mesh-bg flex items-center justify-center p-4">
-        <div className="w-full max-w-sm">
-          <div className="glass-card rounded-2xl p-8 text-center space-y-4 animate-fade-up">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-orange/20 mb-2">
-              <Clock className="w-8 h-8 text-orange" />
-            </div>
-            <h2 className="text-xl font-bold font-display">Compte en attente</h2>
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              Votre compte est en cours de validation par notre équipe.<br />
-              Vous pourrez vous connecter <strong>d'ici 24h</strong> une fois votre accès approuvé.
-            </p>
-            <Button
-              className="w-full rounded-xl bg-gradient-to-r from-primary to-violet"
-              onClick={() => { setIsPending(false); logout(); }}
-            >
-              Retour à la connexion
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session?.user) {
+        const profile = await fetchProfile(session.user.id);
+        setUser(profile);
+      }
+      setLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        const profile = await fetchProfile(session.user.id);
+        setUser(profile);
+      } else {
+        setUser(null);
+      }
+      setLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  async function login(email: string, password: string): Promise<{ error: string | null }> {
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    setLoading(false);
+    if (error) return { error: error.message };
+    return { error: null };
   }
 
-  if (!user) return <LoginPage />;
-
-  const goBack = () => setScreen("menu");
-
-  switch (screen) {
-    case "sos": return <SOSModule onBack={goBack} />;
-    case "signalement": return <SignalementModule onBack={goBack} />;
-    case "acces": return <AccesModule onBack={goBack} />;
-    case "sondage": return <SondageModule onBack={goBack} />;
-    case "chatbot": return <ChatbotModule onBack={goBack} />;
-    case "collecte": return <CollecteModule onBack={goBack} />;
-    case "cvtheque": return <CVthequeModule onBack={goBack} />;
-    case "bonplan": return <BonPlanModule onBack={goBack} />;
-    case "information": return <InformationModule onBack={goBack} />;
-    case "admin": return <AdminModule onBack={goBack} />;
-    case "proprietaire": return <ProprietaireModule onBack={goBack} />;
-    case "commercants": return <CommercantsModule onBack={goBack} />;
-    default: return <MainMenu onNavigate={(m) => setScreen(m as Screen)} />;
+  async function signup(
+    email: string,
+    password: string,
+    role: UserRole,
+    nom?: string,
+    prenom?: string
+  ): Promise<{ error: string | null }> {
+    setLoading(true);
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (error || !data.user) {
+      setLoading(false);
+      return { error: error?.message ?? "Erreur lors de l'inscription" };
+    }
+    const { error: profileError } = await supabase.from("profiles").insert({
+      user_id: data.user.id,
+      email,
+      role,
+      nom: nom ?? null,
+      prenom: prenom ?? null,
+      status: "pending",
+    });
+    setLoading(false);
+    if (profileError) return { error: profileError.message };
+    setPendingAccount(true);
+    return { error: null };
   }
-};
 
-export default Index;
+  async function logout(): Promise<void> {
+    await supabase.auth.signOut();
+    setUser(null);
+    setPendingAccount(false);
+  }
+
+  return (
+    <AuthContext.Provider value={{ user, loading, pendingAccount, login, signup, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth(): AuthContextType {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth must be used within an AuthProvider");
+  return ctx;
+}
